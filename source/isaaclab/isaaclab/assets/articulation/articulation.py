@@ -186,7 +186,7 @@ class Articulation(AssetBase):
                 torque_data=self._external_torque_b.view(-1, 3),
                 position_data=None,
                 indices=self._ALL_INDICES,
-                is_global=False,
+                is_global=self._is_global_force,
             )
 
         # apply actuator models
@@ -822,6 +822,7 @@ class Articulation(AssetBase):
         torques: torch.Tensor,
         body_ids: Sequence[int] | slice | None = None,
         env_ids: Sequence[int] | None = None,
+        is_global: bool = False
     ):
         """Set external force and torque to apply on the asset's bodies in their local frame.
 
@@ -877,6 +878,7 @@ class Articulation(AssetBase):
         # note: these are applied in the write_to_sim function
         self._external_force_b.flatten(0, 1)[indices] = forces.flatten(0, 1)
         self._external_torque_b.flatten(0, 1)[indices] = torques.flatten(0, 1)
+        self._is_global_force = is_global # Store whether the forces and torques are in global or local frame.
 
     def set_joint_position_target(
         self, target: torch.Tensor, joint_ids: Sequence[int] | slice | None = None, env_ids: Sequence[int] | None = None

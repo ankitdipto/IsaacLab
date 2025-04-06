@@ -64,6 +64,12 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
     cfg: ManagerBasedRLEnvCfg
     """Configuration for the environment."""
 
+    obs_history: list[torch.Tensor]
+    """History of observations for each environment."""
+
+    root_lin_vel_history: list[torch.Tensor]
+    """History of root body's linear velocities in the actor frame for each environment."""
+
     def __init__(self, cfg: ManagerBasedRLEnvCfg, render_mode: str | None = None, **kwargs):
         """Initialize the environment.
 
@@ -85,6 +91,12 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
         self.episode_length_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
         # -- set the framerate of the gym video recorder wrapper so that the playback speed of the produced video matches the simulation
         self.metadata["render_fps"] = 1 / self.step_dt
+
+        # initialize the observation history
+        self.obs_history = []
+
+        # initialize the root linear velocity history
+        self.root_lin_vel_history = []
 
         print("[INFO]: Completed setting up the environment...")
 
@@ -171,6 +183,7 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
         """
         # process actions
         self.action_manager.process_action(action.to(self.device))
+        #print(f"action statistics: Mean={torch.mean(action).item()}, std={torch.std(action).item()}, min={torch.min(action).item()}, max={torch.max(action).item()}")
 
         self.recorder_manager.record_pre_step()
 
@@ -181,6 +194,32 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
         # perform physics stepping
         for _ in range(self.cfg.decimation):
             self._sim_step_counter += 1
+
+            # Apply BALLU specific external forces here
+            robot = self.scene["robot"]
+
+            BALLOON_BUOYANCY_MASS = 0.25 #0.202 * 6.0
+            BALLOON_DRAG_COEFFICIENT = 0.4
+            BALLOON_BUOYANCY_FORCE = torch.tensor([[0.0, 0.0, 9.81 * BALLOON_BUOYANCY_MASS]],
+                                          device=self.sim.device)
+            robot_balloon_lin_vel_w = robot.data.body_lin_vel_w[:, 3, :]
+            drag = -torch.sign(robot_balloon_lin_vel_w) * BALLOON_DRAG_COEFFICIENT * (robot_balloon_lin_vel_w ** 2)
+            
+            total_force = BALLOON_BUOYANCY_FORCE.repeat(self.scene.num_envs, 1) + drag
+            robot.set_external_force_and_torque(forces=total_force.unsqueeze(1), 
+                                            torques=torch.zeros(1,3, device=self.sim.device), 
+                                            is_global=True, 
+                                            body_ids = [3])
+            
+            #TODO: Remove the velocity saving during training
+            # Store robot's root linear velocity in actor frame        
+            current_lin_vel = robot.data.root_lin_vel_b.clone().detach()
+            self.root_lin_vel_history.append(current_lin_vel)
+
+            # Optional: If you want to limit the history size to prevent memory issues
+            # if len(self.root_lin_vel_history) > 1000:  # Adjust this limit as needed
+            #    self.root_lin_vel_history.pop(0)
+
             # set actions into buffers
             self.action_manager.apply_action()
             # set actions into simulator
@@ -236,7 +275,80 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
             self.event_manager.apply(mode="interval", dt=self.step_dt)
         # -- compute observations
         # note: done after reset to get the correct observations for reset envs
+        #print("Previous obs for env 0", self.obs_buf['policy'][0])
         self.obs_buf = self.observation_manager.compute()
+        # print("Observation Buffer: ", self.obs_buf)
+        # print("Observation buffer keys: ", self.obs_buf.keys())
+        # print("Observation buffer shape: ", self.obs_buf['policy'].shape)
+        # Check and print if observation buffer contains NaN or Inf values
+        #print("in step")
+        self.obs_history.append(self.obs_buf['policy'])
+        has_nan = torch.isnan(self.obs_buf['policy']).any()
+        has_inf = torch.isinf(self.obs_buf['policy']).any()
+        if has_nan or has_inf:
+            print(f"WARNING: Observation buffer contains {'NaN' if has_nan else ''}{' and ' if has_nan and has_inf else ''}{'Inf' if has_inf else ''} values!")
+            # Optional: Find which specific entries have issues
+            if has_nan:
+                nan_indices = torch.nonzero(torch.isnan(self.obs_buf['policy']), as_tuple=False)
+                print(f"NaN indices: {nan_indices}")
+                # Find which environment has NaN values
+                nan_env_indices = torch.any(torch.isnan(self.obs_buf['policy']), dim=1).nonzero(as_tuple=True)[0]
+                print(f"Environments with NaN values: {nan_env_indices.tolist()}")
+
+                for nan_env_idx in nan_env_indices:
+                    # Get observation history for this specific environment
+                    env_history = torch.stack([obs[nan_env_idx] for obs in self.obs_history])
+                    print(f"Observation history shape for env {nan_env_idx}: {env_history.shape}")
+                    
+                    # Convert to numpy for plotting
+                    env_history_np = env_history.cpu().numpy()
+                    
+                    # Create a plot showing observation values over time
+                    try:
+                        import matplotlib.pyplot as plt
+                        
+                        # Get the number of observation dimensions
+                        num_dims = env_history_np.shape[1]
+                        
+                        # Create a figure with subplots - one for each observation dimension
+                        fig, axes = plt.subplots(num_dims, 1, figsize=(12, 2*num_dims), sharex=True)
+                        
+                        # Find where NaNs first appear for highlighting
+                        nan_timesteps = {}
+                        for i in range(num_dims):
+                            nan_indices = np.where(np.isnan(env_history_np[:, i]))[0]
+                            if len(nan_indices) > 0:
+                                first_nan = nan_indices[0]
+                                nan_timesteps[i] = first_nan
+                        
+                        # Plot each dimension in its own subplot
+                        for i in range(num_dims):
+                            axes[i].plot(env_history_np[:, i], label=f'Dim {i}')
+                            axes[i].set_ylabel(f'Dim {i}')
+                            axes[i].grid(True)
+                            
+                            # Mark where NaN first appears for this dimension
+                            if i in nan_timesteps:
+                                axes[i].axvline(x=nan_timesteps[i], color='r', linestyle='--', 
+                                              alpha=0.7, label=f'NaN at {nan_timesteps[i]}')
+                                axes[i].legend(loc='upper right')
+                        
+                        # Set common labels and title
+                        axes[-1].set_xlabel('Time Steps')
+                        fig.suptitle(f'Observation History for Environment {nan_env_idx}')
+                        
+                        if nan_timesteps:
+                            print(f"First NaN appearances for env {nan_env_idx}: {nan_timesteps}")
+                        
+                        plt.tight_layout()
+                        plt.savefig(f'nan_debug_env_{nan_env_idx}.png')
+                        print(f"Saved plot to nan_debug_env_{nan_env_idx}.png")
+                        print("Plot saving is disabled for now. Make sure to re-enable if needed.")
+                    except ImportError:
+                        print("Matplotlib not available for plotting")
+            if has_inf:
+                inf_indices = torch.nonzero(torch.isinf(self.obs_buf['policy']), as_tuple=False)
+                print(f"Inf indices: {inf_indices}")
 
         # return observations, rewards, resets and extras
         return self.obs_buf, self.reward_buf, self.reset_terminated, self.reset_time_outs, self.extras
