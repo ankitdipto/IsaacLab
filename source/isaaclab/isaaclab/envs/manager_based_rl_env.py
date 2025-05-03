@@ -213,8 +213,8 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
             
             #TODO: Remove the velocity saving during training
             # Store robot's root linear velocity in actor frame        
-            current_lin_vel = robot.data.root_lin_vel_b.clone().detach()
-            self.root_lin_vel_history.append(current_lin_vel)
+            #current_lin_vel = robot.data.root_lin_vel_b.clone().detach()
+            #self.root_lin_vel_history.append(current_lin_vel)
 
             # Optional: If you want to limit the history size to prevent memory issues
             # if len(self.root_lin_vel_history) > 1000:  # Adjust this limit as needed
@@ -243,7 +243,8 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
         self.reset_terminated = self.termination_manager.terminated
         self.reset_time_outs = self.termination_manager.time_outs
         # -- reward computation
-        self.reward_buf = self.reward_manager.compute(dt=self.step_dt)
+        # Note: removing the influence of env time step from reward computation (Suggested by Prof and mentor)
+        self.reward_buf = self.reward_manager.compute(dt=self.step_dt) / self.step_dt
 
         if len(self.recorder_manager.active_terms) > 0:
             # update observations for recording if needed

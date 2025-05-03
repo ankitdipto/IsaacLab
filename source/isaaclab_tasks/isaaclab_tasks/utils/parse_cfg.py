@@ -137,7 +137,7 @@ def parse_env_cfg(
 
 
 def get_checkpoint_path(
-    log_path: str, run_dir: str = ".*", checkpoint: str = ".*", other_dirs: list[str] = None, sort_alpha: bool = True
+    log_path: str, run_dir: str = ".*", checkpoint: str = ".*", other_dirs: str = None, sort_alpha: bool = True
 ) -> str:
     """Get path to the model checkpoint in input directory.
 
@@ -179,7 +179,10 @@ def get_checkpoint_path(
             runs = sorted(runs, key=os.path.getmtime)
         # create last run file path
         if other_dirs is not None:
-            run_path = os.path.join(runs[-1], *other_dirs)
+            print("other_dirs:", other_dirs)
+            #print("*other_dirs:", *other_dirs)
+            run_path = os.path.join(runs[-1], other_dirs)
+            print(f"[INFO] Selected run path: '{run_path}'")
         else:
             run_path = runs[-1]
     except IndexError:
