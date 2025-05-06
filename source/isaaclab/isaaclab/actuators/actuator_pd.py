@@ -23,6 +23,7 @@ if TYPE_CHECKING:
         IdealPDActuatorCfg,
         ImplicitActuatorCfg,
         RemotizedPDActuatorCfg,
+        SpringPDActuatorCfg,
     )
 
 
@@ -413,4 +414,66 @@ class RemotizedPDActuator(DelayedPDActuator):
             control_action.joint_efforts, min=-abs_torque_limits, max=abs_torque_limits
         )
         self.applied_effort = control_action.joint_efforts
+        return control_action
+
+class SpringPDActuator(ActuatorBase):
+    """
+    Actuator that applies spring + PD control to the joint.
+    """
+
+    cfg: SpringPDActuatorCfg
+
+    def __init__(self, cfg: SpringPDActuatorCfg, *args, **kwargs):
+        super().__init__(cfg, *args, **kwargs)
+        self.spring_coeff = cfg.spring_coeff
+        self.spring_damping = cfg.spring_damping
+        self.spring_preload = cfg.spring_preload
+        self.pd_p = cfg.pd_p
+        self.pd_d = cfg.pd_d
+        self.effort_limit = cfg.effort_limit
+        
+    def reset(self, env_ids: Sequence[int]):
+        """Reset the internals within the group.
+
+        Args:
+            env_ids: List of environment IDs to reset.
+        """
+        # No internal state to reset for the effort actuator
+        pass
+
+    def compute(
+        self,
+        control_action: ArticulationActions,
+        joint_pos: torch.Tensor,
+        joint_vel: torch.Tensor,
+    ) -> ArticulationActions:
+        """
+        Compute joint efforts based on the actuator configuration.
+        For standard effort actuator: directly forward the commanded joint_efforts (clipped).
+        For knee joints with spring+PD: calculate spring forces and PD control forces.
+        """
+        
+        # Get rest position (assuming 0.0 for now, could be configured)
+        rest_pos = torch.zeros_like(joint_pos)
+        
+        # Calculate spring torques 
+        spring_torque = -2.0 * self.spring_coeff * \
+                                   (joint_pos - rest_pos + self.spring_preload) - \
+                                   self.spring_damping * joint_vel
+            
+        # Compute PD errors and torques
+        error_pos = control_action.joint_positions - joint_pos
+        error_vel = control_action.joint_velocities - joint_vel
+        pd_torque = self.pd_p * error_pos + self.pd_d * error_vel
+            
+        # Combine spring and PD torques (plus any existing effort commands)
+        self.computed_effort = spring_torque + pd_torque + control_action.joint_efforts
+                
+        # Clip the torques based on limits
+        self.applied_effort = self._clip_effort(self.computed_effort)
+        
+        control_action.joint_efforts = self.applied_effort
+        control_action.joint_positions = None
+        control_action.joint_velocities = None
+
         return control_action

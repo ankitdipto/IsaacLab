@@ -314,7 +314,7 @@ class LiveLinePlot(UIWidgetWrapper):
                                             alignment=omni.ui.Alignment.RIGHT_TOP,
                                             style={
                                                 "color": 0xFFFFFFFF,
-                                                "font_size": 8,
+                                                "font_size": 14,
                                             },
                                         )
 
@@ -343,7 +343,7 @@ class LiveLinePlot(UIWidgetWrapper):
                         width=8,
                         height=2,
                         alignment=omni.ui.Alignment.LEFT_TOP,
-                        style={"color": 0xFFFFFFFF, "font_size": 8},
+                        style={"color": 0xFFFFFFFF, "font_size": 14},
                     )
 
                 # Create bottom label for the y-axis
@@ -353,7 +353,7 @@ class LiveLinePlot(UIWidgetWrapper):
                         width=8,
                         height=2,
                         alignment=omni.ui.Alignment.LEFT_BOTTOM,
-                        style={"color": 0xFFFFFFFF, "font_size": 8},
+                        style={"color": 0xFFFFFFFF, "font_size": 14},
                     )
 
     def _mouse_moved_on_plot(self, x, y, *args):
@@ -417,13 +417,13 @@ class LiveLinePlot(UIWidgetWrapper):
                                 self._legends[idx],
                                 width=max_legend * CHAR_WIDTH,
                                 alignment=omni.ui.Alignment.LEFT,
-                                style={"color": self._colors[idx], "font_size": 12},
+                                style={"color": self._colors[idx], "font_size": 14},
                             )
                             omni.ui.StringField(
                                 model=self._plot_selected_values[idx],
                                 width=max_legend * CHAR_WIDTH,
                                 alignment=omni.ui.Alignment.LEFT,
-                                style={"color": self._colors[idx], "font_size": 10},
+                                style={"color": self._colors[idx], "font_size": 14},
                                 read_only=True,
                             )
 

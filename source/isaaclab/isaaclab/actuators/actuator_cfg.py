@@ -178,6 +178,18 @@ Explicit Actuator Models.
 
 
 @configclass
+class SpringPDActuatorCfg(ActuatorBaseCfg):
+    """Configuration for a direct effort (torque) actuator."""
+    class_type: type = actuator_pd.SpringPDActuator
+    effort_limit: float = MISSING
+    spring_coeff: float = MISSING
+    spring_damping: float = 0.0
+    spring_preload: float = 0.0
+    pd_p: float = MISSING
+    pd_d: float = 0.0
+
+
+@configclass
 class IdealPDActuatorCfg(ActuatorBaseCfg):
     """Configuration for an ideal PD actuator."""
 

@@ -162,7 +162,7 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
     Operations - MDP
     """
 
-    def step(self, action: torch.Tensor) -> VecEnvStepReturn:
+    def step(self, actions: torch.Tensor) -> VecEnvStepReturn:
         """Execute one time-step of the environment's dynamics and reset terminated environments.
 
         Unlike the :class:`ManagerBasedEnv.step` class, the function performs the following operations:
@@ -176,19 +176,19 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
         7. Return the observations, rewards, resets and extras.
 
         Args:
-            action: The actions to apply on the environment. Shape is (num_envs, action_dim).
+            actions: The actions to apply on the environment. Shape is (num_envs, action_dim).
 
         Returns:
             A tuple containing the observations, rewards, resets (terminated and truncated) and extras.
         """
         # process actions
-        self.action_manager.process_action(action.to(self.device))
-        #print(f"action statistics: Mean={torch.mean(action).item()}, std={torch.std(action).item()}, min={torch.min(action).item()}, max={torch.max(action).item()}")
+        self.action_manager.process_action(actions.to(self.device))
 
         self.recorder_manager.record_pre_step()
 
         # check if we need to do rendering within the physics loop
-        # note: checked here once to avoid multiple checks within the loop
+        # note: we assume the render interval to be the shortest accepted rendering interval.
+        #    If a camera needs rendering at a faster frequency, this will lead to unexpected behavior.
         is_rendering = self.sim.has_gui() or self.sim.has_rtx_sensors()
 
         # perform physics stepping
@@ -211,18 +211,75 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
                                             is_global=True, 
                                             body_ids = [3])
             
-            #TODO: Remove the velocity saving during training
-            # Store robot's root linear velocity in actor frame        
-            #current_lin_vel = robot.data.root_lin_vel_b.clone().detach()
-            #self.root_lin_vel_history.append(current_lin_vel)
+            # -- Apply BALLU Indirect Actuation (Linear Proportional) --
+            
+            try:
+                # Find joint indices
+                motor_left_jidx = robot.find_joints("MOTOR_LEFT")[0]
+                motor_right_jidx = robot.find_joints("MOTOR_RIGHT")[0]
+                knee_left_jidx = robot.find_joints("KNEE_LEFT")[0]
+                knee_right_jidx = robot.find_joints("KNEE_RIGHT")[0]
 
-            # Optional: If you want to limit the history size to prevent memory issues
-            # if len(self.root_lin_vel_history) > 1000:  # Adjust this limit as needed
-            #    self.root_lin_vel_history.pop(0)
+                # Check action shape (should be num_envs, 2 for MOTOR_LEFT/RIGHT)
+                if actions.shape != (self.scene.num_envs, 2):
+                    raise ValueError(f"Expected action tensor shape ({self.scene.num_envs}, 2), but got {actions.shape}")
+                action_motor_left = actions[:, 0]
+                action_motor_right = actions[:, 1]
 
-            # set actions into buffers
-            self.action_manager.apply_action()
-            # set actions into simulator
+                # Define joint limits
+                motor_min = 0.0
+                motor_max = torch.pi # 3.14159265
+                knee_min = 0.0
+                knee_max = 1.74532925 # From URDF
+
+                # Prepare full joint target tensor (start with current state to preserve other joints)
+                joint_pos_targets = robot.data.joint_pos_target.clone()
+                
+                try:
+                    # Set motor targets from actions - reshape to ensure proper dimensions
+                    # Reshape action tensors to match target tensors for proper broadcasting
+                    action_motor_left_reshaped = action_motor_left.clone().view(joint_pos_targets[:, motor_left_jidx].shape)
+                    action_motor_right_reshaped = action_motor_right.clone().view(joint_pos_targets[:, motor_right_jidx].shape)
+                    
+                    
+                    
+                    # Linear mapping from motor action range [min, max] to knee target range [min, max]
+                    # Make sure we're working with the correct tensor shapes
+                    #action_motor_left_reshaped = action_motor_left.clone().view(-1, 1)
+                    #action_motor_right_reshaped = action_motor_right.clone().view(-1, 1)
+                    
+                    # Calculate target knee positions using linear transformation
+                    target_knee_left_pos = knee_min + ((action_motor_left_reshaped - motor_min) / (motor_max - motor_min)) * (knee_max - knee_min)
+                    target_knee_right_pos = knee_min + ((action_motor_right_reshaped - motor_min) / (motor_max - motor_min)) * (knee_max - knee_min)
+                    
+                    # Clamp calculated knee targets to ensure they stay within limits
+                    target_knee_left_pos = torch.clamp(target_knee_left_pos, knee_min, knee_max)
+                    target_knee_right_pos = torch.clamp(target_knee_right_pos, knee_min, knee_max)
+                    
+                    # Set motor position targets
+                    joint_pos_targets[:, motor_left_jidx] = action_motor_left_reshaped
+                    joint_pos_targets[:, motor_right_jidx] = action_motor_right_reshaped
+
+                    # Set knee position targets
+                    joint_pos_targets[:, knee_left_jidx] = target_knee_left_pos
+                    joint_pos_targets[:, knee_right_jidx] = target_knee_right_pos
+                    
+                    # Apply motor position targets - this is still needed
+                    robot.set_joint_position_target(joint_pos_targets)
+                    
+                except Exception as e:
+                    raise e
+            except IndexError:
+                 # Handle case where joints are not found (optional: log warning/error)
+                 raise IndexError("Could not find required joint names (MOTOR_LEFT/RIGHT, KNEE_LEFT/RIGHT) in the articulation. Skipping indirect actuation.")
+            except Exception as e:
+                print(f"[Error] Exception during indirect actuation: {e}")
+                raise e
+                # Fallback: Use default action manager if something went wrong
+                #self.action_manager.process_action(actions)
+                #robot.write_data_to_sim() # Still need to write default actions
+
+            # -- End BALLU Indirect Actuation --
             self.scene.write_data_to_sim()
             # simulate
             self.sim.step(render=False)

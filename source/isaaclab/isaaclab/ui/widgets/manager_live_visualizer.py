@@ -213,10 +213,35 @@ class ManagerLiveVisualizer(UiVisualizerBase):
                             # create line plot for single or multivariable signals
                             len_term_shape = len(numpy.array(term).shape)
                             if len_term_shape <= 2:
+                                # Check if this is an ObservationManager or ActionManager and if the term is related to joints
+                                legends = None
+                                if ("ObservationManager" in str(type(self._manager)) and any(joint_term in name for joint_term in ["joint_pos", "joint_vel"])) or \
+                                   ("ActionManager" in str(type(self._manager)) and "joint_pos" in name):
+                                    # Try to get joint names from the scene's articulations
+                                    try:
+                                        # Get the first articulation in the scene (assuming it's the robot)
+                                        for articulation in self._manager._env.scene.articulations.values():
+                                            if articulation.joint_names is not None and len(articulation.joint_names) > 0:
+                                                # For ActionManager, we may need only the motor joints
+                                                if "ActionManager" in str(type(self._manager)):
+                                                    relevant_joint_names = [name for name in articulation.joint_names if "MOTOR" in name]
+                                                    if len(relevant_joint_names) > 0 and len(relevant_joint_names) == len(term):
+                                                        legends = relevant_joint_names
+                                                    else:
+                                                        legends = articulation.joint_names
+                                                else:
+                                                    legends = articulation.joint_names
+                                                break
+                                    except (AttributeError, IndexError) as e:
+                                        print(f"Error getting joint names: {e}")
+                                        # If we can't get the joint names, we'll use the default legends
+                                        pass
+                                
                                 plot = LiveLinePlot(
                                     y_data=[[elem] for elem in term],
-                                    plot_height=150,
+                                    plot_height=450,
                                     show_legend=True,
+                                    legends=legends,
                                 )
                                 self._term_visualizers.append(plot)
                             # create an image plot for 2d and greater data (i.e. mono and rgb images)
