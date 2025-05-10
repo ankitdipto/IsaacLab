@@ -64,11 +64,11 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
     cfg: ManagerBasedRLEnvCfg
     """Configuration for the environment."""
 
-    obs_history: list[torch.Tensor]
-    """History of observations for each environment."""
+    #obs_history: list[torch.Tensor]
+    #"""History of observations for each environment."""
 
-    root_lin_vel_history: list[torch.Tensor]
-    """History of root body's linear velocities in the actor frame for each environment."""
+    #root_lin_vel_history: list[torch.Tensor]
+    #"""History of root body's linear velocities in the actor frame for each environment."""
 
     def __init__(self, cfg: ManagerBasedRLEnvCfg, render_mode: str | None = None, **kwargs):
         """Initialize the environment.
@@ -183,7 +183,9 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
         """
         # process actions
         self.action_manager.process_action(actions.to(self.device))
+        del actions # Sanity check! I should not use actions after this point.
 
+        processed_actions = self.action_manager._terms["joint_pos"].processed_actions
         self.recorder_manager.record_pre_step()
 
         # check if we need to do rendering within the physics loop
@@ -221,10 +223,16 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
                 knee_right_jidx = robot.find_joints("KNEE_RIGHT")[0]
 
                 # Check action shape (should be num_envs, 2 for MOTOR_LEFT/RIGHT)
-                if actions.shape != (self.scene.num_envs, 2):
-                    raise ValueError(f"Expected action tensor shape ({self.scene.num_envs}, 2), but got {actions.shape}")
-                action_motor_left = actions[:, 0]
-                action_motor_right = actions[:, 1]
+                if processed_actions.shape != (self.scene.num_envs, 2):
+                    raise ValueError(f"Expected action tensor shape ({self.scene.num_envs}, 2), but got {processed_actions.shape}")
+                action_motor_left = processed_actions[:, 0]
+                action_motor_right = processed_actions[:, 1]
+
+                # Verify actions are in valid range
+                assert torch.all(action_motor_left >= 0.0) and torch.all(action_motor_left <= 3.15), \
+                    "Motor left actions out of range [0.0, 3.15]"
+                assert torch.all(action_motor_right >= 0.0) and torch.all(action_motor_right <= 3.15), \
+                    "Motor right actions out of range [0.0, 3.15]"
 
                 # Define joint limits
                 motor_min = 0.0
@@ -264,7 +272,7 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
                     joint_pos_targets[:, knee_left_jidx] = target_knee_left_pos
                     joint_pos_targets[:, knee_right_jidx] = target_knee_right_pos
                     
-                    # Apply motor position targets - this is still needed
+                    # Apply position targets for the knees and motors
                     robot.set_joint_position_target(joint_pos_targets)
                     
                 except Exception as e:
@@ -340,7 +348,7 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
         # print("Observation buffer shape: ", self.obs_buf['policy'].shape)
         # Check and print if observation buffer contains NaN or Inf values
         #print("in step")
-        self.obs_history.append(self.obs_buf['policy'])
+        #self.obs_history.append(self.obs_buf['policy'])
         has_nan = torch.isnan(self.obs_buf['policy']).any()
         has_inf = torch.isinf(self.obs_buf['policy']).any()
         if has_nan or has_inf:
@@ -353,57 +361,57 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
                 nan_env_indices = torch.any(torch.isnan(self.obs_buf['policy']), dim=1).nonzero(as_tuple=True)[0]
                 print(f"Environments with NaN values: {nan_env_indices.tolist()}")
 
-                for nan_env_idx in nan_env_indices:
-                    # Get observation history for this specific environment
-                    env_history = torch.stack([obs[nan_env_idx] for obs in self.obs_history])
-                    print(f"Observation history shape for env {nan_env_idx}: {env_history.shape}")
+                # for nan_env_idx in nan_env_indices:
+                #     # Get observation history for this specific environment
+                #     env_history = torch.stack([obs[nan_env_idx] for obs in self.obs_history])
+                #     print(f"Observation history shape for env {nan_env_idx}: {env_history.shape}")
                     
-                    # Convert to numpy for plotting
-                    env_history_np = env_history.cpu().numpy()
+                #     # Convert to numpy for plotting
+                #     env_history_np = env_history.cpu().numpy()
                     
-                    # Create a plot showing observation values over time
-                    try:
-                        import matplotlib.pyplot as plt
+                #     # Create a plot showing observation values over time
+                #     try:
+                #         import matplotlib.pyplot as plt
                         
-                        # Get the number of observation dimensions
-                        num_dims = env_history_np.shape[1]
+                #         # Get the number of observation dimensions
+                #         num_dims = env_history_np.shape[1]
                         
-                        # Create a figure with subplots - one for each observation dimension
-                        fig, axes = plt.subplots(num_dims, 1, figsize=(12, 2*num_dims), sharex=True)
+                #         # Create a figure with subplots - one for each observation dimension
+                #         fig, axes = plt.subplots(num_dims, 1, figsize=(12, 2*num_dims), sharex=True)
                         
-                        # Find where NaNs first appear for highlighting
-                        nan_timesteps = {}
-                        for i in range(num_dims):
-                            nan_indices = np.where(np.isnan(env_history_np[:, i]))[0]
-                            if len(nan_indices) > 0:
-                                first_nan = nan_indices[0]
-                                nan_timesteps[i] = first_nan
+                #         # Find where NaNs first appear for highlighting
+                #         nan_timesteps = {}
+                #         for i in range(num_dims):
+                #             nan_indices = np.where(np.isnan(env_history_np[:, i]))[0]
+                #             if len(nan_indices) > 0:
+                #                 first_nan = nan_indices[0]
+                #                 nan_timesteps[i] = first_nan
                         
-                        # Plot each dimension in its own subplot
-                        for i in range(num_dims):
-                            axes[i].plot(env_history_np[:, i], label=f'Dim {i}')
-                            axes[i].set_ylabel(f'Dim {i}')
-                            axes[i].grid(True)
+                #         # Plot each dimension in its own subplot
+                #         for i in range(num_dims):
+                #             axes[i].plot(env_history_np[:, i], label=f'Dim {i}')
+                #             axes[i].set_ylabel(f'Dim {i}')
+                #             axes[i].grid(True)
                             
-                            # Mark where NaN first appears for this dimension
-                            if i in nan_timesteps:
-                                axes[i].axvline(x=nan_timesteps[i], color='r', linestyle='--', 
-                                              alpha=0.7, label=f'NaN at {nan_timesteps[i]}')
-                                axes[i].legend(loc='upper right')
+                #             # Mark where NaN first appears for this dimension
+                #             if i in nan_timesteps:
+                #                 axes[i].axvline(x=nan_timesteps[i], color='r', linestyle='--', 
+                #                               alpha=0.7, label=f'NaN at {nan_timesteps[i]}')
+                #                 axes[i].legend(loc='upper right')
                         
-                        # Set common labels and title
-                        axes[-1].set_xlabel('Time Steps')
-                        fig.suptitle(f'Observation History for Environment {nan_env_idx}')
+                #         # Set common labels and title
+                #         axes[-1].set_xlabel('Time Steps')
+                #         fig.suptitle(f'Observation History for Environment {nan_env_idx}')
                         
-                        if nan_timesteps:
-                            print(f"First NaN appearances for env {nan_env_idx}: {nan_timesteps}")
+                #         if nan_timesteps:
+                #             print(f"First NaN appearances for env {nan_env_idx}: {nan_timesteps}")
                         
-                        plt.tight_layout()
-                        plt.savefig(f'nan_debug_env_{nan_env_idx}.png')
-                        print(f"Saved plot to nan_debug_env_{nan_env_idx}.png")
-                        print("Plot saving is disabled for now. Make sure to re-enable if needed.")
-                    except ImportError:
-                        print("Matplotlib not available for plotting")
+                #         plt.tight_layout()
+                #         plt.savefig(f'nan_debug_env_{nan_env_idx}.png')
+                #         print(f"Saved plot to nan_debug_env_{nan_env_idx}.png")
+                #         print("Plot saving is disabled for now. Make sure to re-enable if needed.")
+                #     except ImportError:
+                #         print("Matplotlib not available for plotting")
             if has_inf:
                 inf_indices = torch.nonzero(torch.isinf(self.obs_buf['policy']), as_tuple=False)
                 print(f"Inf indices: {inf_indices}")

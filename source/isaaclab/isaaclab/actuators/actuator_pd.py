@@ -452,6 +452,10 @@ class SpringPDActuator(ActuatorBase):
         For standard effort actuator: directly forward the commanded joint_efforts (clipped).
         For knee joints with spring+PD: calculate spring forces and PD control forces.
         """
+        # Assert that all joint positions are within the expected range
+        assert torch.all((control_action.joint_positions >= 0.0) & \
+            (control_action.joint_positions <= 1.75)), \
+            "Joint positions must be within [0, 1.75] range for BALLU robot"
         
         # Get rest position (assuming 0.0 for now, could be configured)
         rest_pos = torch.zeros_like(joint_pos)
