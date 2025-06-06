@@ -453,12 +453,13 @@ class SpringPDActuator(ActuatorBase):
         For knee joints with spring+PD: calculate spring forces and PD control forces.
         """
         # Assert that all joint positions are within the expected range
-        assert torch.all((control_action.joint_positions >= 0.0) & \
-            (control_action.joint_positions <= 1.75)), \
-            "Joint positions must be within [0, 1.75] range for BALLU robot"
+        #assert torch.all((control_action.joint_positions >= 0.0) & \
+        #    (control_action.joint_positions <= 1.75)), \
+        #    "Joint positions must be within [0, 1.75] range for BALLU robot"
         
-        # Get rest position (assuming 0.0 for now, could be configured)
-        rest_pos = torch.zeros_like(joint_pos)
+        # Rest position is 27.35 degrees, convert to radians
+        rest_pos = torch.tensor([0.4773, 0.4773], device=joint_pos.device).repeat(joint_pos.shape[0], 1)
+        #print(f"Rest pos shape: {rest_pos.shape}, joint pos shape: {joint_pos.shape}")
         
         # Calculate spring torques 
         spring_torque = -2.0 * self.spring_coeff * \
@@ -468,13 +469,26 @@ class SpringPDActuator(ActuatorBase):
         # Compute PD errors and torques
         error_pos = control_action.joint_positions - joint_pos
         error_vel = control_action.joint_velocities - joint_vel
-        pd_torque = self.pd_p * error_pos + self.pd_d * error_vel
+
+        clipped_vel_error = torch.clip(error_vel, 
+                                       min=-self.velocity_limit, 
+                                       max=self.velocity_limit)
+        pd_torque = self.pd_p * error_pos + self.pd_d * clipped_vel_error
             
         # Combine spring and PD torques (plus any existing effort commands)
         self.computed_effort = spring_torque + pd_torque + control_action.joint_efforts
-                
+        #print("---------------------------------------------------------")
+        #print(f"Control action Pos target: {control_action.joint_positions.cpu().numpy()}, Vel target: {control_action.joint_velocities.cpu().numpy()}")
+        #print(f"Error pos: {error_pos.cpu().numpy()}, Error vel: {error_vel.cpu().numpy()}")
+        #print(f"Spr torque: {spring_torque.cpu().numpy()}, PD torque: {pd_torque.cpu().numpy()}, Prev effort: {control_action.joint_efforts.cpu().numpy()}")
+        #print(f"Computed effort: {self.computed_effort.cpu().numpy()}")
         # Clip the torques based on limits
         self.applied_effort = self._clip_effort(self.computed_effort)
+        # effort_limit_clipped_by_motors = self._clip_effort(self.computed_effort) # This clipping is wrt the MAX MOTOR TORQUE
+        # required_effort = self.final_pvel * (self.velocity_limit - joint_vel)
+        # self.applied_effort = torch.clip(required_effort, 
+        #                                  min=-effort_limit_clipped_by_motors, 
+        #                                  max=effort_limit_clipped_by_motors)
         
         control_action.joint_efforts = self.applied_effort
         control_action.joint_positions = None

@@ -41,6 +41,9 @@ class RslRlPpoActorCriticCfg:
     activation: str = MISSING
     """The activation function for the actor and critic networks."""
 
+    actor_output_activation: str | None = None
+    """The activation function for the actor's output layer. If None, no activation is applied after the last linear layer of the actor. Default is None."""
+
 
 @configclass
 class RslRlPpoActorCriticRecurrentCfg(RslRlPpoActorCriticCfg):

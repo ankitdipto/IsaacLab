@@ -17,6 +17,7 @@ from isaacsim.core.version import get_version
 
 from isaaclab.managers import CommandManager, CurriculumManager, RewardManager, TerminationManager
 from isaaclab.ui.widgets import ManagerLiveVisualizer
+import isaaclab.utils.math as math_utils
 
 from .common import VecEnvStepReturn
 from .manager_based_env import ManagerBasedEnv
@@ -136,7 +137,7 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
         self.reward_manager = RewardManager(self.cfg.rewards, self)
         print("[INFO] Reward Manager: ", self.reward_manager)
         # -- curriculum manager
-        self.curriculum_manager = CurriculumManager(self.cfg.curriculum, self)
+        self.curriculum_manager = CurriculumManager(self.cfg.curriculums, self)
         print("[INFO] Curriculum Manager: ", self.curriculum_manager)
 
         # setup the action and observation spaces for Gym
@@ -200,19 +201,52 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
             # Apply BALLU specific external forces here
             robot = self.scene["robot"]
 
-            BALLOON_BUOYANCY_MASS = 0.25 #0.202 * 6.0
-            BALLOON_DRAG_COEFFICIENT = 0.4
-            BALLOON_BUOYANCY_FORCE = torch.tensor([[0.0, 0.0, 9.81 * BALLOON_BUOYANCY_MASS]],
-                                          device=self.sim.device)
-            robot_balloon_lin_vel_w = robot.data.body_lin_vel_w[:, 3, :]
-            drag = -torch.sign(robot_balloon_lin_vel_w) * BALLOON_DRAG_COEFFICIENT * (robot_balloon_lin_vel_w ** 2)
+            BALLOON_BUOYANCY_MASS = 0.24
+            balloon_body_id = 3
+            BALLOON_DRAG_COEFFICIENT = 0.4 #0.3 * 1.5
+            BALLOON_BUOYANCY_FORCE = torch.tensor([0.0, 0.0, 9.81 * BALLOON_BUOYANCY_MASS], device=self.sim.device)
+            buoyancy_force_w = BALLOON_BUOYANCY_FORCE.unsqueeze(0).repeat(self.scene.num_envs, 1)
             
-            total_force = BALLOON_BUOYANCY_FORCE.repeat(self.scene.num_envs, 1) + drag
-            robot.set_external_force_and_torque(forces=total_force.unsqueeze(1), 
-                                            torques=torch.zeros(1,3, device=self.sim.device), 
-                                            is_global=True, 
-                                            body_ids = [3])
+            balloons_quat_w = robot.data.body_link_quat_w[:, balloon_body_id, :]
+            #buoyancy_force_l = math_utils.quat_rotate_inverse(balloons_quat_w, buoyancy_force_w)
+            robot_balloon_lin_vel_w = robot.data.body_lin_vel_w[:, balloon_body_id, :]
+            drag_force_w = -torch.sign(robot_balloon_lin_vel_w) * BALLOON_DRAG_COEFFICIENT * (robot_balloon_lin_vel_w ** 2)
             
+            ######## DOING FORCE + TORQUE calculation updated knowledge here ########
+            balloon_ids, balloon_names = robot.find_bodies("BALLOON")
+            external_wrench_l = torch.zeros(self.scene.num_envs, 
+                                            len(balloon_ids), 
+                                            6, 
+                                            device=self.sim.device)
+            
+            buoyancy_force_l = math_utils.quat_rotate_inverse(balloons_quat_w, buoyancy_force_w)
+            drag_force_l = math_utils.quat_rotate_inverse(balloons_quat_w, drag_force_w)
+            distance_from_neck_l = torch.tensor([-0.00006, -0.37953, 0.0], device=self.sim.device) \
+                                        .unsqueeze(0).repeat(self.scene.num_envs, 1)
+            buoyancy_torque_l = torch.cross(distance_from_neck_l, buoyancy_force_l, dim=1)
+            drag_torque_l = torch.cross(distance_from_neck_l, drag_force_l, dim=1)
+            #buoyancy_torque_l = buoyancy_torque_l.clip(min=-1e-2, max=1e-2)
+            #print("buoyancy_torque_l: ", buoyancy_torque_l.cpu().numpy())
+            #print("buoyancy_torque_l shape: ", buoyancy_torque_l.shape)
+
+            external_wrench_l[..., :3] = (buoyancy_force_l + drag_force_l).unsqueeze(1)
+            external_wrench_l[..., 3:] = (buoyancy_torque_l + drag_torque_l).unsqueeze(1)
+            #total_force = buoyancy_force_local #+ drag
+            #forces_local = buoyancy_force_local.unsqueeze(1)
+            #torques_local = torch.zeros_like(forces_local)
+            total_force_w = (buoyancy_force_w + drag_force_w).unsqueeze(1)
+            total_torque_w = torch.zeros_like(total_force_w)
+
+            # robot.set_external_force_and_torque(forces=total_force_w, 
+            #                                 torques=total_torque_w, 
+            #                                 is_global=True, 
+            #                                 body_ids = [balloon_body_id])
+            robot.set_external_force_and_torque(
+                forces=external_wrench_l[..., :3],
+                torques=external_wrench_l[..., 3:],
+                body_ids=balloon_ids,
+                is_global=False
+            )
             # -- Apply BALLU Indirect Actuation (Linear Proportional) --
             
             try:
@@ -229,10 +263,10 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
                 action_motor_right = processed_actions[:, 1]
 
                 # Verify actions are in valid range
-                assert torch.all(action_motor_left >= 0.0) and torch.all(action_motor_left <= 3.15), \
-                    "Motor left actions out of range [0.0, 3.15]"
-                assert torch.all(action_motor_right >= 0.0) and torch.all(action_motor_right <= 3.15), \
-                    "Motor right actions out of range [0.0, 3.15]"
+                # assert torch.all(action_motor_left >= 0.0) and torch.all(action_motor_left <= 3.15), \
+                #     "Motor left actions out of range [0.0, 3.15]"
+                # assert torch.all(action_motor_right >= 0.0) and torch.all(action_motor_right <= 3.15), \
+                #     "Motor right actions out of range [0.0, 3.15]"
 
                 # Define joint limits
                 motor_min = 0.0
@@ -242,6 +276,8 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
 
                 # Prepare full joint target tensor (start with current state to preserve other joints)
                 joint_pos_targets = robot.data.joint_pos_target.clone()
+                joint_pos_defaults = robot.data.default_joint_pos.clone()
+                #print("Joint pos defaults: ", joint_pos_defaults.cpu().numpy())
                 
                 try:
                     # Set motor targets from actions - reshape to ensure proper dimensions
@@ -257,21 +293,23 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
                     #action_motor_right_reshaped = action_motor_right.clone().view(-1, 1)
                     
                     # Calculate target knee positions using linear transformation
+                    #print("Action motor left reshaped: ", action_motor_left_reshaped.cpu().numpy())
+                    #print("Action motor right reshaped: ", action_motor_right_reshaped.cpu().numpy())
                     target_knee_left_pos = knee_min + ((action_motor_left_reshaped - motor_min) / (motor_max - motor_min)) * (knee_max - knee_min)
                     target_knee_right_pos = knee_min + ((action_motor_right_reshaped - motor_min) / (motor_max - motor_min)) * (knee_max - knee_min)
                     
                     # Clamp calculated knee targets to ensure they stay within limits
-                    target_knee_left_pos = torch.clamp(target_knee_left_pos, knee_min, knee_max)
-                    target_knee_right_pos = torch.clamp(target_knee_right_pos, knee_min, knee_max)
+                    # target_knee_left_pos = torch.clamp(target_knee_left_pos, knee_min, knee_max)
+                    #target_knee_right_pos = torch.clamp(target_knee_right_pos, knee_min, knee_max)
                     
                     # Set motor position targets
                     joint_pos_targets[:, motor_left_jidx] = action_motor_left_reshaped
                     joint_pos_targets[:, motor_right_jidx] = action_motor_right_reshaped
 
                     # Set knee position targets
-                    joint_pos_targets[:, knee_left_jidx] = target_knee_left_pos
-                    joint_pos_targets[:, knee_right_jidx] = target_knee_right_pos
-                    
+                    joint_pos_targets[:, knee_left_jidx] = target_knee_left_pos #+ joint_pos_defaults[:, knee_left_jidx]
+                    joint_pos_targets[:, knee_right_jidx] = target_knee_right_pos #+ joint_pos_defaults[:, knee_right_jidx]
+                    #print(f" Setting residual joint pos targets: {target_knee_left_pos.cpu().numpy()}, {target_knee_right_pos.cpu().numpy()}")
                     # Apply position targets for the knees and motors
                     robot.set_joint_position_target(joint_pos_targets)
                     

@@ -183,10 +183,12 @@ class SpringPDActuatorCfg(ActuatorBaseCfg):
     class_type: type = actuator_pd.SpringPDActuator
     effort_limit: float = MISSING
     spring_coeff: float = MISSING
-    spring_damping: float = 0.0
-    spring_preload: float = 0.0
+    spring_damping: float = MISSING
+    spring_preload: float = MISSING
     pd_p: float = MISSING
-    pd_d: float = 0.0
+    pd_d: float = MISSING
+    velocity_limit: float = MISSING # MAX MOTOR VELOCITY
+    final_pvel: float | None = None
 
 
 @configclass
