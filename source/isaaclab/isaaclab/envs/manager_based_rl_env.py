@@ -99,6 +99,8 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
         # initialize the root linear velocity history
         self.root_lin_vel_history = []
 
+        self.buoyancy_offset = kwargs.get("buoyancy_offset", [-0.00006, -0.37953, 0.0])
+
         print("[INFO]: Completed setting up the environment...")
 
     """
@@ -221,7 +223,7 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
             
             buoyancy_force_l = math_utils.quat_rotate_inverse(balloons_quat_w, buoyancy_force_w)
             drag_force_l = math_utils.quat_rotate_inverse(balloons_quat_w, drag_force_w)
-            distance_from_neck_l = torch.tensor([-0.00006, -0.37953, 0.0], device=self.sim.device) \
+            distance_from_neck_l = torch.tensor(self.buoyancy_offset, device=self.sim.device) \
                                         .unsqueeze(0).repeat(self.scene.num_envs, 1)
             buoyancy_torque_l = torch.cross(distance_from_neck_l, buoyancy_force_l, dim=1)
             drag_torque_l = torch.cross(distance_from_neck_l, drag_force_l, dim=1)
