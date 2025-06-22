@@ -125,6 +125,10 @@ class RslRlPpoAlgorithmCfg:
     in which case RND is not used.
     """
 
+    # Mirror symmetry parameters (Yu et al. approach)
+    mirror_symmetry_cfg: dict | None = None
+    """The mirror symmetry configuration. Default is None, in which case mirror symmetry is not used."""
+
 
 #########################
 # Runner configurations #
