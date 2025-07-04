@@ -126,7 +126,7 @@ class RslRlPpoAlgorithmCfg:
     """
 
     # Mirror symmetry parameters (Yu et al. approach)
-    mirror_symmetry_cfg: dict | None = None
+    mirror_symmetry_cfg: RslRlMirrorSymmetryCfg | None = None
     """The mirror symmetry configuration. Default is None, in which case mirror symmetry is not used."""
 
 
@@ -204,3 +204,29 @@ class RslRlOnPolicyRunnerCfg:
 
     If regex expression, the latest (alphabetical order) matching file will be loaded.
     """
+
+#########################
+# Symmetry configurations #
+#########################
+
+@configclass
+class RslRlMirrorSymmetryCfg:
+    """Configuration for the mirror symmetry."""
+
+    enabled: bool = False
+    """Whether to use mirror symmetry."""
+
+    weight: float = 1.0
+    """The weight for the mirror symmetry loss."""
+    
+    symmetric_joint_pairs: list[tuple[int, int]] = MISSING
+    """The symmetric joint pairs."""
+
+    symmetric_obs_indices: list[int] = MISSING
+    """The symmetric observation indices."""
+
+    symmetric_action_pairs: list[tuple[int, int]] = MISSING
+    """The symmetric action pairs."""
+    
+    symmetric_action_indices: list[tuple[int, int]] = MISSING
+    """The symmetric action indices."""
