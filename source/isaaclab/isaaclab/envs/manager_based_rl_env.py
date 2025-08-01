@@ -101,6 +101,8 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
 
         self.buoyancy_offset = kwargs.get("buoyancy_offset", [-0.00006, -0.37953, 0.0])
 
+        self.balloon_buoyancy_mass = kwargs.get("balloon_buoyancy_mass", 0.24)
+        
         print("[INFO]: Completed setting up the environment...")
 
     """
@@ -203,7 +205,7 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
             # Apply BALLU specific external forces here
             robot = self.scene["robot"]
 
-            BALLOON_BUOYANCY_MASS = 0.24
+            BALLOON_BUOYANCY_MASS = self.balloon_buoyancy_mass
             balloon_body_id = 3
             BALLOON_DRAG_COEFFICIENT = 0.4 #0.3 * 1.5
             BALLOON_BUOYANCY_FORCE = torch.tensor([0.0, 0.0, 9.81 * BALLOON_BUOYANCY_MASS], device=self.sim.device)
