@@ -474,7 +474,9 @@ class SpringPDActuator(ActuatorBase):
                                        min=-self.velocity_limit, 
                                        max=self.velocity_limit)
         pd_torque = self.pd_p * error_pos + self.pd_d * clipped_vel_error
-            
+
+        pd_torque_real = torch.where(pd_torque < 0, 1e-3 * pd_torque, pd_torque)  # Scale negative torques by 1e-3 to represent slack string behavior
+        # print(f"PD torque: {pd_torque.cpu().numpy()}, PD torque real: {pd_torque_real.cpu().numpy()}")
         # Combine spring and PD torques (plus any existing effort commands)
         self.computed_effort = spring_torque + pd_torque + control_action.joint_efforts
         #print("---------------------------------------------------------")
