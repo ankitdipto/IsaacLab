@@ -349,6 +349,10 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
         self.reset_buf = self.termination_manager.compute()
         self.reset_terminated = self.termination_manager.terminated
         self.reset_time_outs = self.termination_manager.time_outs
+        # reset_envs_for_termination = self.reset_terminated.nonzero(as_tuple=False).squeeze(-1).tolist()
+        # if len(reset_envs_for_termination) > 0:
+        #     print("Resetting envs for termination: ", reset_envs_for_termination)
+            
         # -- reward computation
         # Note: removing the influence of env time step from reward computation (Suggested by Prof and mentor)
         self.reward_buf = self.reward_manager.compute(dt=self.step_dt) / self.step_dt
