@@ -101,8 +101,17 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
 
         self.buoyancy_offset = kwargs.get("buoyancy_offset", [-0.00006, -0.37953, 0.0])
 
-        self.balloon_buoyancy_mass = kwargs.get("balloon_buoyancy_mass", 0.24)
+        # Calculate and store the total mass of the robot
+        robot = self.scene["robot"]
+        self.robot_total_mass = robot.data.default_mass.sum(dim=1)
+        print(f"[INFO]: Robot total mass: {self.robot_total_mass.mean().item():.4f} kg (per environment)")
+
+        self.balloon_buoyancy_mass = kwargs.get("gravity_compensation_ratio", 0.84) * self.robot_total_mass.mean().item()
+        print("------------------------------------------------------------------------------------")
+        print(f"[INFO]: Balloon buoyancy mass: {self.balloon_buoyancy_mass} kg")
+        print("------------------------------------------------------------------------------------")
         
+        print("Received obstacle height list: ", self.obstacle_height_list)
         print("[INFO]: Completed setting up the environment...")
 
     """

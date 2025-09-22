@@ -121,3 +121,6 @@ class ManagerBasedEnvCfg:
 
     xr: XrCfg | None = None
     """Configuration for viewing and interacting with the environment through an XR device."""
+
+    obstacle_height_list: list[float] = []
+    """List of obstacle heights. Defaults to an empty list."""

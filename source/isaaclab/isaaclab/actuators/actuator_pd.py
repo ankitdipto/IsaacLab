@@ -431,6 +431,7 @@ class SpringPDActuator(ActuatorBase):
         self.pd_p = cfg.pd_p
         self.pd_d = cfg.pd_d
         self.effort_limit = cfg.effort_limit
+        self.spring_torque = torch.zeros_like(self.computed_effort)
         
     def reset(self, env_ids: Sequence[int]):
         """Reset the internals within the group.
@@ -462,7 +463,7 @@ class SpringPDActuator(ActuatorBase):
         #print(f"Rest pos shape: {rest_pos.shape}, joint pos shape: {joint_pos.shape}")
         
         # Calculate spring torques 
-        spring_torque = -2.0 * self.spring_coeff * \
+        self.spring_torque = -2.0 * self.spring_coeff * \
                                    (joint_pos - rest_pos + self.spring_preload) - \
                                    self.spring_damping * joint_vel
             
@@ -475,10 +476,10 @@ class SpringPDActuator(ActuatorBase):
                                        max=self.velocity_limit)
         pd_torque = self.pd_p * error_pos + self.pd_d * clipped_vel_error
 
-        pd_torque_real = torch.where(pd_torque < 0, 1e-3 * pd_torque, pd_torque)  # Scale negative torques by 1e-3 to represent slack string behavior
+        pd_torque_real = torch.where(pd_torque < 0, 0.0, pd_torque)  # Scale negative torques by 1e-3 to represent slack string behavior
         # print(f"PD torque: {pd_torque.cpu().numpy()}, PD torque real: {pd_torque_real.cpu().numpy()}")
         # Combine spring and PD torques (plus any existing effort commands)
-        self.computed_effort = spring_torque + pd_torque + control_action.joint_efforts
+        self.computed_effort = self.spring_torque + pd_torque_real + control_action.joint_efforts
         #print("---------------------------------------------------------")
         #print(f"Control action Pos target: {control_action.joint_positions.cpu().numpy()}, Vel target: {control_action.joint_velocities.cpu().numpy()}")
         #print(f"Error pos: {error_pos.cpu().numpy()}, Error vel: {error_vel.cpu().numpy()}")

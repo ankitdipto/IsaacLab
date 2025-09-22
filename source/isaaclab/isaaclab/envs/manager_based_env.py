@@ -81,6 +81,9 @@ class ManagerBasedEnv:
         # initialize internal variables
         self._is_closed = False
 
+        # set the obstacle height list if available
+        self.obstacle_height_list = cfg.obstacle_height_list
+
         # set the seed for the environment
         if self.cfg.seed is not None:
             self.cfg.seed = self.seed(self.cfg.seed)
