@@ -99,7 +99,7 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
         # initialize the root linear velocity history
         self.root_lin_vel_history = []
 
-        self.buoyancy_offset = kwargs.get("buoyancy_offset", [-0.00006, -0.37953, 0.0])
+        self.buoyancy_offset = kwargs.get("buoyancy_offset", [0.0, -0.38, 0.0])
 
         # Calculate and store the total mass of the robot
         robot = self.scene["robot"]
@@ -112,6 +112,8 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
         print("------------------------------------------------------------------------------------")
         
         print("Received obstacle height list: ", self.obstacle_height_list)
+
+        self.rsl_rl_iteration = 0
         print("[INFO]: Completed setting up the environment...")
 
     """

@@ -67,7 +67,7 @@ class ManagerBasedRLEnvCfg(ManagerBasedEnvCfg):
     Please refer to the :class:`isaaclab.managers.TerminationManager` class for more details.
     """
 
-    curriculum: object | None = None
+    curriculums: object | None = None
     """Curriculum settings. Defaults to None, in which case no curriculum is applied.
 
     Please refer to the :class:`isaaclab.managers.CurriculumManager` class for more details.
