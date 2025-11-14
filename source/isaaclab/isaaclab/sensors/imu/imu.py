@@ -148,9 +148,26 @@ class Imu(SensorBase):
         # default to all sensors
         if len(env_ids) == self._num_envs:
             env_ids = slice(None)
+        
+        # === SANITIZATION LAYER 1: Clean raw physics engine outputs ===
         # obtain the poses of the sensors
         pos_w, quat_w = self._view.get_transforms()[env_ids].split([3, 4], dim=-1)
         quat_w = math_utils.convert_quat(quat_w, to="wxyz")
+        
+        # Sanitize position (replace NaN/Inf with reasonable bounds)
+        pos_w = torch.nan_to_num(pos_w, nan=0.0, posinf=1e6, neginf=-1e6)
+        
+        # Sanitize and renormalize quaternion (critical for stability)
+        quat_w = torch.nan_to_num(quat_w, nan=0.0, posinf=1.0, neginf=-1.0)
+        quat_norm = torch.norm(quat_w, dim=-1, keepdim=True)
+        # If quaternion norm is too small, replace with identity quaternion
+        identity_quat = torch.zeros_like(quat_w)
+        identity_quat[:, 0] = 1.0  # w=1, x=y=z=0
+        quat_w = torch.where(
+            quat_norm > 1e-6,
+            quat_w / quat_norm,  # Normalize valid quaternions
+            identity_quat  # Replace invalid with identity
+        )
 
         # store the poses
         self._data.pos_w[env_ids] = pos_w + math_utils.quat_rotate(quat_w, self._offset_pos_b[env_ids])
@@ -158,27 +175,107 @@ class Imu(SensorBase):
 
         # get the offset from COM to link origin
         com_pos_b = self._view.get_coms().to(self.device).split([3, 4], dim=-1)[0]
+        com_pos_b = torch.nan_to_num(com_pos_b, nan=0.0, posinf=10.0, neginf=-10.0)
 
         # obtain the velocities of the link COM
         lin_vel_w, ang_vel_w = self._view.get_velocities()[env_ids].split([3, 3], dim=-1)
+        
+        # Sanitize velocities from physics engine
+        lin_vel_w = torch.nan_to_num(
+            lin_vel_w, 
+            nan=0.0, 
+            posinf=self.cfg.max_linear_velocity, 
+            neginf=-self.cfg.max_linear_velocity
+        )
+        ang_vel_w = torch.nan_to_num(
+            ang_vel_w, 
+            nan=0.0, 
+            posinf=self.cfg.max_angular_velocity, 
+            neginf=-self.cfg.max_angular_velocity
+        )
+        
+        # Clamp velocities to configured limits
+        lin_vel_w = torch.clamp(lin_vel_w, -self.cfg.max_linear_velocity, self.cfg.max_linear_velocity)
+        ang_vel_w = torch.clamp(ang_vel_w, -self.cfg.max_angular_velocity, self.cfg.max_angular_velocity)
+        
+        # === SANITIZATION LAYER 2: Guard intermediate operations ===
         # if an offset is present or the COM does not agree with the link origin, the linear velocity has to be
         # transformed taking the angular velocity into account
-        lin_vel_w += torch.linalg.cross(
-            ang_vel_w, math_utils.quat_rotate(quat_w, self._offset_pos_b[env_ids] - com_pos_b[env_ids]), dim=-1
+        offset_vec = self._offset_pos_b[env_ids] - com_pos_b[env_ids]
+        offset_vec = torch.nan_to_num(offset_vec, nan=0.0, posinf=10.0, neginf=-10.0)
+        
+        cross_term = torch.linalg.cross(
+            ang_vel_w, math_utils.quat_rotate(quat_w, offset_vec), dim=-1
+        )
+        # Sanitize cross product result
+        cross_term = torch.nan_to_num(cross_term, nan=0.0, posinf=100.0, neginf=-100.0)
+        cross_term = torch.clamp(cross_term, -100.0, 100.0)
+        
+        lin_vel_w += cross_term
+
+        # Guard against division by near-zero timestep
+        dt_safe = max(self._dt, self.cfg.min_dt)
+        
+        # numerical derivative with safe timestep
+        lin_acc_w = (lin_vel_w - self._prev_lin_vel_w[env_ids]) / dt_safe + self._gravity_bias_w[env_ids]
+        ang_acc_w = (ang_vel_w - self._prev_ang_vel_w[env_ids]) / dt_safe
+        
+        # Sanitize accelerations after numerical differentiation
+        lin_acc_w = torch.nan_to_num(
+            lin_acc_w,
+            nan=0.0,
+            posinf=self.cfg.max_linear_acceleration,
+            neginf=-self.cfg.max_linear_acceleration
+        )
+        ang_acc_w = torch.nan_to_num(
+            ang_acc_w,
+            nan=0.0,
+            posinf=self.cfg.max_angular_acceleration,
+            neginf=-self.cfg.max_angular_acceleration
+        )
+        
+        # Clamp accelerations to configured limits
+        lin_acc_w = torch.clamp(lin_acc_w, -self.cfg.max_linear_acceleration, self.cfg.max_linear_acceleration)
+        ang_acc_w = torch.clamp(ang_acc_w, -self.cfg.max_angular_acceleration, self.cfg.max_angular_acceleration)
+        
+        # === SANITIZATION LAYER 3: Clean final outputs before storing ===
+        # Transform to body frame
+        lin_vel_b = math_utils.quat_rotate_inverse(self._data.quat_w[env_ids], lin_vel_w)
+        ang_vel_b = math_utils.quat_rotate_inverse(self._data.quat_w[env_ids], ang_vel_w)
+        lin_acc_b = math_utils.quat_rotate_inverse(self._data.quat_w[env_ids], lin_acc_w)
+        ang_acc_b = math_utils.quat_rotate_inverse(self._data.quat_w[env_ids], ang_acc_w)
+        
+        # Final sanitization and clipping before storing (these go into RL observations!)
+        self._data.lin_vel_b[env_ids] = torch.clamp(
+            torch.nan_to_num(lin_vel_b, nan=0.0),
+            -self.cfg.max_linear_velocity,
+            self.cfg.max_linear_velocity
+        )
+        self._data.ang_vel_b[env_ids] = torch.clamp(
+            torch.nan_to_num(ang_vel_b, nan=0.0),
+            -self.cfg.max_angular_velocity,
+            self.cfg.max_angular_velocity
+        )
+        self._data.lin_acc_b[env_ids] = torch.clamp(
+            torch.nan_to_num(lin_acc_b, nan=0.0),
+            -self.cfg.max_linear_acceleration,
+            self.cfg.max_linear_acceleration
+        )
+        self._data.ang_acc_b[env_ids] = torch.clamp(
+            torch.nan_to_num(ang_acc_b, nan=0.0),
+            -self.cfg.max_angular_acceleration,
+            self.cfg.max_angular_acceleration
         )
 
-        # numerical derivative
-        lin_acc_w = (lin_vel_w - self._prev_lin_vel_w[env_ids]) / self._dt + self._gravity_bias_w[env_ids]
-        ang_acc_w = (ang_vel_w - self._prev_ang_vel_w[env_ids]) / self._dt
-        # store the velocities
-        self._data.lin_vel_b[env_ids] = math_utils.quat_rotate_inverse(self._data.quat_w[env_ids], lin_vel_w)
-        self._data.ang_vel_b[env_ids] = math_utils.quat_rotate_inverse(self._data.quat_w[env_ids], ang_vel_w)
-        # store the accelerations
-        self._data.lin_acc_b[env_ids] = math_utils.quat_rotate_inverse(self._data.quat_w[env_ids], lin_acc_w)
-        self._data.ang_acc_b[env_ids] = math_utils.quat_rotate_inverse(self._data.quat_w[env_ids], ang_acc_w)
-
-        self._prev_lin_vel_w[env_ids] = lin_vel_w
-        self._prev_ang_vel_w[env_ids] = ang_vel_w
+        # Store sanitized velocities for next iteration (prevent NaN propagation)
+        self._prev_lin_vel_w[env_ids] = torch.nan_to_num(
+            torch.clamp(lin_vel_w, -self.cfg.max_linear_velocity, self.cfg.max_linear_velocity),
+            nan=0.0
+        )
+        self._prev_ang_vel_w[env_ids] = torch.nan_to_num(
+            torch.clamp(ang_vel_w, -self.cfg.max_angular_velocity, self.cfg.max_angular_velocity),
+            nan=0.0
+        )
 
     def _initialize_buffers_impl(self):
         """Create buffers for storing data."""

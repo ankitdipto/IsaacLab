@@ -44,3 +44,18 @@ class ImuCfg(SensorBaseCfg):
     config parameter allows users to subtract that bias if set to (0.,0.,0.). By default this is set to (0.0,0.0,9.81)
     which results in a positive acceleration reading in the world Z.
     """
+
+    max_linear_velocity: float = 100.0
+    """Maximum linear velocity magnitude (m/s) before clipping. Defaults to 100.0 m/s."""
+
+    max_angular_velocity: float = 50.0
+    """Maximum angular velocity magnitude (rad/s) before clipping. Defaults to 50.0 rad/s."""
+
+    max_linear_acceleration: float = 1000.0
+    """Maximum linear acceleration magnitude (m/s²) before clipping. Defaults to 1000.0 m/s²."""
+
+    max_angular_acceleration: float = 1000.0
+    """Maximum angular acceleration magnitude (rad/s²) before clipping. Defaults to 1000.0 rad/s²."""
+
+    min_dt: float = 1e-6
+    """Minimum timestep for numerical differentiation to prevent division by zero. Defaults to 1e-6 seconds."""
