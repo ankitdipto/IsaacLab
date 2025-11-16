@@ -11,6 +11,7 @@ from isaaclab.utils import configclass
 
 from . import actuator_net, actuator_pd
 from .actuator_base import ActuatorBase
+import torch
 
 
 @configclass

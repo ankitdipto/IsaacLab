@@ -79,6 +79,13 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
             render_mode: The render mode for the environment. Defaults to None, which
                 is similar to ``"human"``.
         """
+        # Store parameters that may be needed during manager/observation setup
+        # before the base class constructor calls :meth:`load_managers`.
+        self.GCR_range = kwargs.get("GCR_range", None)
+        self.GCR = kwargs.get("GCR", 0.84)
+        # Placeholder so attribute exists even if observations access it early.
+        self.balloon_buoyancy_mass_t = None
+
         # -- counter for curriculum
         self.common_step_counter = 0
 
@@ -106,9 +113,26 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
         self.robot_total_mass = robot.data.default_mass.sum(dim=1)
         print(f"[INFO]: Robot total mass: {self.robot_total_mass.mean().item():.4f} kg (per environment)")
 
-        self.balloon_buoyancy_mass = kwargs.get("gravity_compensation_ratio", 0.84) * self.robot_total_mass.mean().item()
+        # If buoyancy masses were not already created (e.g. during observation
+        # term preparation), compute them here using the same parameters.
+        if self.balloon_buoyancy_mass_t is None:
+            if self.GCR_range is not None:
+                GCR_range = self.GCR_range
+                GCR_tensor = (
+                    torch.rand(self.scene.num_envs, 1, device=self.device)
+                    * (GCR_range[1] - GCR_range[0])
+                    + GCR_range[0]
+                )
+                self.balloon_buoyancy_mass_t = GCR_tensor * self.robot_total_mass.mean().item()
+            else:
+                balloon_buoyancy_mass = self.GCR * self.robot_total_mass.mean().item()
+                self.balloon_buoyancy_mass_t = torch.full(
+                    (self.scene.num_envs, 1),
+                    balloon_buoyancy_mass,
+                    device=self.device,
+                )
         print("------------------------------------------------------------------------------------")
-        print(f"[INFO]: Balloon buoyancy mass: {self.balloon_buoyancy_mass} kg")
+        print(f"[INFO]: Mean balloon buoyancy mass: {self.balloon_buoyancy_mass_t.mean().item():.4f} kg (per environment)")
         print("------------------------------------------------------------------------------------")
         
         print("Received obstacle height list: ", self.obstacle_height_list)
@@ -216,11 +240,14 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
             # Apply BALLU specific external forces here
             robot = self.scene["robot"]
 
-            BALLOON_BUOYANCY_MASS = self.balloon_buoyancy_mass
+            # BALLOON_BUOYANCY_MASS = self.balloon_buoyancy_mass
             balloon_body_id = 3
             BALLOON_DRAG_COEFFICIENT = 0.4 #0.3 * 1.5
-            BALLOON_BUOYANCY_FORCE = torch.tensor([0.0, 0.0, 9.81 * BALLOON_BUOYANCY_MASS], device=self.sim.device)
-            buoyancy_force_w = BALLOON_BUOYANCY_FORCE.unsqueeze(0).repeat(self.scene.num_envs, 1)
+            # BALLOON_BUOYANCY_FORCE = torch.tensor([0.0, 0.0, 9.81 * BALLOON_BUOYANCY_MASS], device=self.sim.device)
+            # buoyancy_force_w = BALLOON_BUOYANCY_FORCE.unsqueeze(0).repeat(self.scene.num_envs, 1)
+            GRAVITY_t = torch.tensor([0.0, 0.0, 9.81], device=self.device)
+            buoyancy_force_w = GRAVITY_t * self.balloon_buoyancy_mass_t
+            # print(f"Shape of buoyancy force: {buoyancy_force_w.shape}")
             
             balloons_quat_w = robot.data.body_link_quat_w[:, balloon_body_id, :]
             #buoyancy_force_l = math_utils.quat_rotate_inverse(balloons_quat_w, buoyancy_force_w)
