@@ -83,6 +83,8 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
         # before the base class constructor calls :meth:`load_managers`.
         self.GCR_range = kwargs.get("GCR_range", None)
         self.GCR = kwargs.get("GCR", 0.84)
+        self.spcf_range = kwargs.get("spcf_range", None)
+        self.spcf = kwargs.get("spcf", 0.005)
         # Placeholder so attribute exists even if observations access it early.
         self.balloon_buoyancy_mass_t = None
 
@@ -242,7 +244,7 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
 
             # BALLOON_BUOYANCY_MASS = self.balloon_buoyancy_mass
             balloon_body_id = 3
-            BALLOON_DRAG_COEFFICIENT = 0.4 #0.3 * 1.5
+            BALLOON_DRAG_COEFFICIENT = 0.0 #0.4 #0.3 * 1.5
             # BALLOON_BUOYANCY_FORCE = torch.tensor([0.0, 0.0, 9.81 * BALLOON_BUOYANCY_MASS], device=self.sim.device)
             # buoyancy_force_w = BALLOON_BUOYANCY_FORCE.unsqueeze(0).repeat(self.scene.num_envs, 1)
             GRAVITY_t = torch.tensor([0.0, 0.0, 9.81], device=self.device)
