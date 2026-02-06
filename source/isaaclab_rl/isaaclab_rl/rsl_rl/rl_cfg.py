@@ -62,6 +62,86 @@ class RslRlPpoActorCriticRecurrentCfg(RslRlPpoActorCriticCfg):
     """The number of RNN layers."""
 
 
+@configclass
+class RslRlMoEActorCriticCfg:
+    """Configuration for the Mixture-of-Experts actor-critic networks."""
+
+    class_name: str = "MoEActorCritic"
+    """The policy class name. Default is MoEActorCritic."""
+
+    init_noise_std: float = MISSING
+    """The initial noise standard deviation for the policy."""
+
+    noise_std_type: Literal["scalar", "log"] = "scalar"
+    """The type of noise standard deviation for the policy. Default is scalar."""
+
+    actor_hidden_dims: list[int] = MISSING
+    """The hidden dimensions of each expert actor network."""
+
+    critic_hidden_dims: list[int] = MISSING
+    """The hidden dimensions of the critic network."""
+
+    gate_hidden_dims: list[int] = MISSING
+    """The hidden dimensions of the gating network."""
+
+    activation: str = MISSING
+    """The activation function for the actor and critic networks."""
+
+    num_experts: int = 4
+    """The number of expert networks. Default is 4."""
+
+    num_morphology_obs: int = 11
+    """The dimension of the morphology observation vector. Default is 11 for BALLU."""
+
+    routing_type: Literal["soft", "hard"] = "soft"
+    """Expert routing type. 'soft' = temperature-scaled softmax weighted combination.
+    'hard' = straight-through Gumbel-softmax one-hot selection. Default is 'soft'."""
+
+    tau_initial: float = 1.0
+    """The initial temperature for Gumbel-softmax. Default is 1.0."""
+
+    tau_min: float = 0.1
+    """The minimum temperature for Gumbel-softmax. Default is 0.1."""
+
+    tau_anneal_rate: float = 0.0001
+    """The rate of temperature annealing per iteration. Default is 0.0001."""
+
+    load_balance_coef: float = 0.01
+    """The coefficient for the load balancing loss. Default is 0.01."""
+
+    diversity_coef_max: float = 1.0e-3
+    """The maximum coefficient for the diversity loss. Default is 1.0e-3."""
+
+    diversity_start_iter: int = 1200
+    """The start iteration for the diversity loss. Default is 1200."""
+
+    diversity_ramp_iters: int = 300
+    """The number of iterations for the diversity loss ramp. Default is 300."""
+
+    diversity_eps: float = 1.0e-8
+    """The epsilon for the diversity loss. Default is 1.0e-8."""
+
+
+@configclass
+class RslRlMoECfg:
+    """Configuration for MoE-specific settings in the PPO algorithm."""
+
+    num_morphology_obs: int = 11
+    """The dimension of the morphology observation vector. Default is 11 for BALLU."""
+
+    routing_type: Literal["soft", "hard"] = "soft"
+    """Expert routing type. Must match the policy's routing_type. Default is 'soft'."""
+
+    load_balance_coef: float = 0.01
+    """The coefficient for the load balancing loss. Default is 0.01."""
+
+    gate_probs_log_interval: int = 3
+    """How often to log gate probabilities (in iterations). Default is 3."""
+
+    gate_probs_num_envs: int = 4
+    """Number of environments to log gate probabilities for. Default is 4."""
+
+
 ############################
 # Algorithm configurations #
 ############################
@@ -128,6 +208,11 @@ class RslRlPpoAlgorithmCfg:
     # Mirror symmetry parameters (Yu et al. approach)
     mirror_symmetry_cfg: RslRlMirrorSymmetryCfg | None = None
     """The mirror symmetry configuration. Default is None, in which case mirror symmetry is not used."""
+
+    moe_cfg: RslRlMoECfg | None = None
+    """The configuration for Mixture-of-Experts. Default is None, in which case MoE is not used.
+    Note: This is only used when the policy is MoEActorCritic.
+    """
 
 
 #########################
