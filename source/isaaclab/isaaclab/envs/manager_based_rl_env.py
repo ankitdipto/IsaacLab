@@ -87,6 +87,7 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
         self.spcf = kwargs.get("spcf", 0.005)
         # Placeholder so attribute exists even if observations access it early.
         self.balloon_buoyancy_mass_t = None
+        self.cluster_assignments: torch.Tensor | None = None
 
         # -- counter for curriculum
         self.common_step_counter = 0
@@ -112,27 +113,31 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
 
         # Calculate and store the total mass of the robot
         robot = self.scene["robot"]
-        self.robot_total_mass = robot.data.default_mass.sum(dim=1)
+        self.robot_total_mass = robot.data.default_mass.sum(dim=1).to(self.device)
         print(f"[INFO]: Robot total mass: {self.robot_total_mass.mean().item():.4f} kg (per environment)")
 
         # If buoyancy masses were not already created (e.g. during observation
         # term preparation), compute them here using the same parameters.
         if self.balloon_buoyancy_mass_t is None:
+            balloon_masses = None
             if self.GCR_range is not None:
                 GCR_range = self.GCR_range
                 GCR_tensor = (
-                    torch.rand(self.scene.num_envs, 1, device=self.device)
+                    torch.rand(self.scene.num_envs, device=self.device)
                     * (GCR_range[1] - GCR_range[0])
                     + GCR_range[0]
                 )
-                self.balloon_buoyancy_mass_t = GCR_tensor * self.robot_total_mass.mean().item()
+                balloon_masses = GCR_tensor * self.robot_total_mass
             else:
-                balloon_buoyancy_mass = self.GCR * self.robot_total_mass.mean().item()
-                self.balloon_buoyancy_mass_t = torch.full(
-                    (self.scene.num_envs, 1),
-                    balloon_buoyancy_mass,
-                    device=self.device,
-                )
+                # balloon_buoyancy_mass = self.GCR * self.robot_total_mass
+                # self.balloon_buoyancy_mass_t = torch.full(
+                #     (self.scene.num_envs,),
+                #     balloon_buoyancy_mass,
+                #     device=self.device,
+                # )
+                balloon_masses = self.GCR * self.robot_total_mass
+
+            self.balloon_buoyancy_mass_t = balloon_masses.view(-1, 1)
         print("------------------------------------------------------------------------------------")
         print(f"[INFO]: Mean balloon buoyancy mass: {self.balloon_buoyancy_mass_t.mean().item():.4f} kg (per environment)")
         print("------------------------------------------------------------------------------------")
