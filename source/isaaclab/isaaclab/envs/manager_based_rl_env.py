@@ -85,6 +85,10 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
         self.GCR = kwargs.get("GCR", 0.84)
         self.spcf_range = kwargs.get("spcf_range", None)
         self.spcf = kwargs.get("spcf", 0.005)
+        # Pre-specified per-env values (list/array, one entry per env).
+        # Takes priority over GCR_range / GCR and spcf_range / spcf respectively.
+        self.GCR_values = kwargs.get("GCR_values", None)
+        self.spcf_values = kwargs.get("spcf_values", None)
         # Placeholder so attribute exists even if observations access it early.
         self.balloon_buoyancy_mass_t = None
         self.cluster_assignments: torch.Tensor | None = None
@@ -120,7 +124,15 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
         # term preparation), compute them here using the same parameters.
         if self.balloon_buoyancy_mass_t is None:
             balloon_masses = None
-            if self.GCR_range is not None:
+            if self.GCR_values is not None:
+                # Pre-specified per-env GCR values — highest priority.
+                gcr_tensor = torch.as_tensor(self.GCR_values, device=self.device, dtype=torch.float32)
+                if gcr_tensor.shape[0] < self.scene.num_envs:
+                    reps = (self.scene.num_envs + gcr_tensor.shape[0] - 1) // gcr_tensor.shape[0]
+                    gcr_tensor = gcr_tensor.repeat(reps)[: self.scene.num_envs]
+                self.gcr_t = gcr_tensor
+                balloon_masses = gcr_tensor * self.robot_total_mass
+            elif self.GCR_range is not None:
                 GCR_range = self.GCR_range
                 GCR_tensor = (
                     torch.rand(self.scene.num_envs, device=self.device)
@@ -129,12 +141,6 @@ class ManagerBasedRLEnv(ManagerBasedEnv, gym.Env):
                 )
                 balloon_masses = GCR_tensor * self.robot_total_mass
             else:
-                # balloon_buoyancy_mass = self.GCR * self.robot_total_mass
-                # self.balloon_buoyancy_mass_t = torch.full(
-                #     (self.scene.num_envs,),
-                #     balloon_buoyancy_mass,
-                #     device=self.device,
-                # )
                 balloon_masses = self.GCR * self.robot_total_mass
 
             self.balloon_buoyancy_mass_t = balloon_masses.view(-1, 1)
